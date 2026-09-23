@@ -1,0 +1,221 @@
+from dataclasses import dataclass
+import re
+
+from integrator.email_engine.models import NormalizedEmail
+
+
+@dataclass
+class EmailClassification:
+    category: str
+    needs_reply: bool
+    confidence: float
+    reason: str
+
+
+class EmailClassifier:
+    """
+    Conservative deterministic email classifier.
+
+    Important rules:
+    - Automated newsletters must never be treated as conversations.
+    - Job/recruiter classification requires actual recruitment indicators.
+    - Unknown messages default to no automatic reply.
+    """
+
+    JOB_KEYWORDS = (
+        "job",
+        "job opportunity",
+        "application",
+        "applicant",
+        "recruiter",
+        "recruitment",
+        "interview",
+        "hiring",
+        "vacancy",
+        "vacancies",
+        "position available",
+        "career opportunity",
+        "shortlisted",
+        "shortlist",
+        "employment opportunity",
+        "employment offer",
+        "job offer",
+        "interview invitation",
+        "interview invite",
+        "application update",
+        "application status",
+        "candidate",
+        "hiring manager",
+    )
+
+    SCHOOL_KEYWORDS = (
+        "assignment",
+        "class",
+        "lecture",
+        "course",
+        "student",
+        "school",
+        "college",
+        "university",
+        "exam",
+        "test",
+        "deadline",
+        "tutor",
+        "trainer",
+        "tm ",
+        "training",
+    )
+
+    CLIENT_KEYWORDS = (
+        "project",
+        "website",
+        "development",
+        "developer",
+        "quote",
+        "quotation",
+        "client",
+        "freelance",
+        "freelancer",
+        "proposal",
+        "invoice",
+        "payment",
+        "business website",
+    )
+
+    SERVICE_KEYWORDS = (
+        "password",
+        "security alert",
+        "verification code",
+        "verify your",
+        "account alert",
+        "login",
+        "sign in",
+        "receipt",
+        "transaction",
+        "notification",
+        "confirm your account",
+        "account activity",
+        "one-time password",
+        "otp",
+    )
+
+    NEWSLETTER_KEYWORDS = (
+        "newsletter",
+        "weekly digest",
+        "daily digest",
+        "linkedin",
+        "unsubscribe",
+        "marketing",
+        "promotion",
+        "promotional",
+        "special offer",
+        "read on linkedin",
+        "keep reading on linkedin",
+        "join the conversation",
+        "you are receiving linkedin notification emails",
+    )
+
+    SPAM_KEYWORDS = (
+        "you won",
+        "winner",
+        "lottery",
+        "claim your prize",
+        "free money",
+        "million dollars",
+        "urgent transfer",
+        "send money",
+        "crypto investment",
+    )
+
+    def classify(
+        self,
+        message: NormalizedEmail,
+    ) -> EmailClassification:
+        text = self._combined_text(message)
+
+        # 1. Strong spam/scam indicators always win.
+        if self._contains(text, self.SPAM_KEYWORDS):
+            return EmailClassification(
+                category="spam/irrelevant",
+                needs_reply=False,
+                confidence=0.95,
+                reason="Detected strong spam or scam indicators.",
+            )
+
+        # 2. Automated newsletters must be checked before jobs.
+        # This prevents newsletter content containing words such as
+        # "job", "career", "application", etc. from becoming a reply target.
+        if self._contains(text, self.NEWSLETTER_KEYWORDS):
+            return EmailClassification(
+                category="newsletter",
+                needs_reply=False,
+                confidence=0.97,
+                reason="Detected automated newsletter or mailing-list indicators.",
+            )
+
+        # 3. Actual recruitment-related messages.
+        if self._contains(text, self.JOB_KEYWORDS):
+            return EmailClassification(
+                category="job/recruiter",
+                needs_reply=True,
+                confidence=0.90,
+                reason="Detected direct employment or recruitment indicators.",
+            )
+
+        # 4. Education/class communication.
+        if self._contains(text, self.SCHOOL_KEYWORDS):
+            return EmailClassification(
+                category="school/class",
+                needs_reply=True,
+                confidence=0.85,
+                reason="Detected education or class-related terms.",
+            )
+
+        # 5. Client/project communication.
+        if self._contains(text, self.CLIENT_KEYWORDS):
+            return EmailClassification(
+                category="client",
+                needs_reply=True,
+                confidence=0.85,
+                reason="Detected client or project-related terms.",
+            )
+
+        # 6. Automated account/service messages.
+        if self._contains(text, self.SERVICE_KEYWORDS):
+            return EmailClassification(
+                category="service/notification",
+                needs_reply=False,
+                confidence=0.90,
+                reason="Detected automated service or account notification.",
+            )
+
+        # 7. Unknown messages are safe by default.
+        return EmailClassification(
+            category="personal/professional",
+            needs_reply=False,
+            confidence=0.40,
+            reason="No strong category indicators detected.",
+        )
+
+    @staticmethod
+    def _combined_text(message: NormalizedEmail) -> str:
+        return " ".join(
+            [
+                message.sender or "",
+                message.subject or "",
+                message.body or "",
+            ]
+        ).lower()
+
+    @staticmethod
+    def _contains(
+        text: str,
+        keywords: tuple[str, ...],
+    ) -> bool:
+        for keyword in keywords:
+            pattern = r"\b" + re.escape(keyword.strip()) + r"\b"
+
+            if re.search(pattern, text, re.IGNORECASE):
+                return True
+
+        return False

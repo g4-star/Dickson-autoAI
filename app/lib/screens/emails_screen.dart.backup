@@ -1,0 +1,630 @@
+import 'package:flutter/material.dart';
+
+import '../services/api_service.dart';
+
+class EmailsScreen extends StatefulWidget {
+  const EmailsScreen({super.key});
+
+  @override
+  State<EmailsScreen> createState() => _EmailsScreenState();
+}
+
+class _EmailsScreenState extends State<EmailsScreen> {
+  List<dynamic> emails = [];
+
+  bool loading = true;
+  String? errorMessage;
+
+  String selectedCategory = 'All';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadEmails();
+  }
+
+  Future<void> _loadEmails() async {
+    if (!mounted) return;
+
+    setState(() {
+      loading = true;
+      errorMessage = null;
+    });
+
+    try {
+      final result = await ApiService.getEmails(limit: 50);
+
+      if (!mounted) return;
+
+      setState(() {
+        emails = result;
+        loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        loading = false;
+        errorMessage = 'Could not load emails. Check your connection.';
+      });
+    }
+  }
+
+  List<dynamic> get filteredEmails {
+    if (selectedCategory == 'All') {
+      return emails;
+    }
+
+    if (selectedCategory == 'Interviews') {
+      return emails.where((email) {
+        final category =
+            email['category']?.toString().toLowerCase() ?? '';
+
+        final subject =
+            email['subject']?.toString().toLowerCase() ?? '';
+
+        return category.contains('interview') ||
+            subject.contains('interview');
+      }).toList();
+    }
+
+    if (selectedCategory == 'Recruiters') {
+      return emails.where((email) {
+        final category =
+            email['category']?.toString().toLowerCase() ?? '';
+
+        return category.contains('job') ||
+            category.contains('recruiter');
+      }).toList();
+    }
+
+    return emails;
+  }
+
+  String _sender(dynamic email) {
+    return email['sender']?.toString() ??
+        email['from']?.toString() ??
+        email['sender_email']?.toString() ??
+        'Unknown sender';
+  }
+
+  String _subject(dynamic email) {
+    final subject = email['subject']?.toString();
+
+    if (subject == null || subject.trim().isEmpty) {
+      return '(No subject)';
+    }
+
+    return subject;
+  }
+
+  String _body(dynamic email) {
+    return email['body']?.toString() ??
+        email['body_text']?.toString() ??
+        email['snippet']?.toString() ??
+        '';
+  }
+
+  String _category(dynamic email) {
+    final category = email['category']?.toString() ?? '';
+
+    if (category.isEmpty) {
+      return 'email';
+    }
+
+    return category;
+  }
+
+  String _formatDate(dynamic email) {
+    final raw =
+        email['received_at']?.toString() ??
+        email['created_at']?.toString();
+
+    if (raw == null || raw.isEmpty) {
+      return '';
+    }
+
+    try {
+      final date = DateTime.parse(raw).toLocal();
+
+      final now = DateTime.now();
+      final today =
+          date.year == now.year &&
+          date.month == now.month &&
+          date.day == now.day;
+
+      if (today) {
+        final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;
+        final minute = date.minute.toString().padLeft(2, '0');
+        final period = date.hour >= 12 ? 'PM' : 'AM';
+
+        return '$hour:$minute $period';
+      }
+
+      final yesterday = now.subtract(const Duration(days: 1));
+
+      if (date.year == yesterday.year &&
+          date.month == yesterday.month &&
+          date.day == yesterday.day) {
+        return 'Yesterday';
+      }
+
+      return '${date.day}/${date.month}/${date.year}';
+    } catch (_) {
+      return raw;
+    }
+  }
+
+  Color _categoryColor(String category) {
+    switch (category.toLowerCase()) {
+      case 'job':
+      case 'recruiter':
+      case 'job/recruiter':
+        return Colors.greenAccent;
+
+      case 'school':
+      case 'class':
+        return Colors.blueAccent;
+
+      case 'client':
+        return Colors.orangeAccent;
+
+      case 'newsletter':
+        return Colors.purpleAccent;
+
+      case 'spam':
+      case 'irrelevant':
+        return Colors.redAccent;
+
+      default:
+        return Colors.white54;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Emails',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        actions: [
+          IconButton(
+            onPressed: loading ? null : _loadEmails,
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh emails',
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: _loadEmails,
+        child: _buildBody(),
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (loading && emails.isEmpty) {
+      return const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
+
+    if (errorMessage != null && emails.isEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(24),
+        children: [
+          const SizedBox(height: 100),
+          const Icon(
+            Icons.cloud_off_outlined,
+            size: 60,
+            color: Colors.white24,
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            'Could not load emails',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            errorMessage!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white54,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Center(
+            child: ElevatedButton.icon(
+              onPressed: _loadEmails,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Try again'),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final visibleEmails = filteredEmails;
+
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _categoryChip('All'),
+              _categoryChip('Interviews'),
+              _categoryChip('Recruiters'),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 20),
+
+        if (loading)
+          const LinearProgressIndicator(),
+
+        if (visibleEmails.isEmpty)
+          _buildEmptyState()
+        else
+          ...visibleEmails.map(
+            (email) => _buildEmailCard(email),
+          ),
+      ],
+    );
+  }
+
+  Widget _categoryChip(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: FilterChip(
+        selected: selectedCategory == text,
+        label: Text(text),
+        onSelected: (_) {
+          setState(() {
+            selectedCategory = text;
+          });
+        },
+      ),
+    );
+  }
+
+  Widget _buildEmailCard(dynamic email) {
+    final sender = _sender(email);
+    final subject = _subject(email);
+    final body = _body(email);
+    final category = _category(email);
+    final date = _formatDate(email);
+
+    final needsReply = email['needs_reply'] == true;
+    final replied = email['replied'] == true;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () {
+          _openEmail(email);
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                radius: 23,
+                child: Text(
+                  sender.isNotEmpty
+                      ? sender[0].toUpperCase()
+                      : '?',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+
+              const SizedBox(width: 12),
+
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            sender,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        if (date.isNotEmpty)
+                          Text(
+                            date,
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 12,
+                            ),
+                          ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 5),
+
+                    Text(
+                      subject,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+
+                    if (body.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        body.replaceAll(RegExp(r'\s+'), ' ').trim(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 8),
+
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _categoryBadge(category),
+
+                        if (needsReply)
+                          _statusBadge(
+                            'Needs reply',
+                            Colors.orangeAccent,
+                          ),
+
+                        if (replied)
+                          _statusBadge(
+                            'Replied',
+                            Colors.greenAccent,
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _categoryBadge(String category) {
+    final color = _categoryColor(category);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 8,
+        vertical: 4,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        category,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _statusBadge(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 8,
+        vertical: 4,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.symmetric(
+        vertical: 70,
+        horizontal: 20,
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFF11161E),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: const Column(
+        children: [
+          Icon(
+            Icons.email_outlined,
+            size: 55,
+            color: Colors.white24,
+          ),
+          SizedBox(height: 16),
+          Text(
+            'No emails found',
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          SizedBox(height: 8),
+          Text(
+            'Try refreshing or changing the category.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white54,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openEmail(dynamic email) {
+    final sender = _sender(email);
+    final subject = _subject(email);
+    final body = _body(email);
+    final category = _category(email);
+    final date = _formatDate(email);
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EmailDetailScreen(
+          sender: sender,
+          subject: subject,
+          body: body,
+          category: category,
+          date: date,
+        ),
+      ),
+    );
+  }
+}
+
+class EmailDetailScreen extends StatelessWidget {
+  final String sender;
+  final String subject;
+  final String body;
+  final String category;
+  final String date;
+
+  const EmailDetailScreen({
+    super.key,
+    required this.sender,
+    required this.subject,
+    required this.body,
+    required this.category,
+    required this.date,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Email',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              subject,
+              style: const TextStyle(
+                fontSize: 21,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(
+                  radius: 23,
+                  child: Text(
+                    sender.isNotEmpty
+                        ? sender[0].toUpperCase()
+                        : '?',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        sender,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      if (date.isNotEmpty)
+                        Text(
+                          date,
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 12,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 18),
+
+            Wrap(
+              spacing: 8,
+              children: [
+                Chip(
+                  label: Text(category),
+                ),
+              ],
+            ),
+
+            const Divider(height: 30),
+
+            SelectableText(
+              body.isEmpty ? '(No email body)' : body,
+              style: const TextStyle(
+                fontSize: 15,
+                height: 1.55,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
